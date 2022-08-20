@@ -159,4 +159,4 @@ app.post('/', upload.single('thumb'), (req, res, next) => {
 
 
 app.listen(10000);
-console.log('Plex Discord Annoucer listening...');
+console.log('Plex Discord Announcer listening...');
