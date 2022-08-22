@@ -15,10 +15,13 @@ const Constants = {
     }
 };
 
+const plexPort = '10000';
+const discordUrl = 'https://discord.com/api/webhooks/1009702941395001364/t-l7Tc42ec_m4cQmYcGrlTm6JdCc3rJaLrtwpmd3lkbefnx5TC8FgJsmM3I3h3_Ro6gx';
+
 const { Webhook, MessageBuilder } = require('discord-webhook-nodejs');
 const upload = multer({ dest: '/tmp/' });
 const app = express();
-const discord = new Webhook('https://discord.com/api/webhooks/1009702941395001364/t-l7Tc42ec_m4cQmYcGrlTm6JdCc3rJaLrtwpmd3lkbefnx5TC8FgJsmM3I3h3_Ro6gx');
+const discord = new Webhook(discordUrl);
 
 parsePlexHookPayload = (payload) => {
     const metadata = payload?.Metadata;
@@ -158,5 +161,5 @@ app.post('/', upload.single('thumb'), (req, res, next) => {
 }); 
 
 
-app.listen(10000);
-console.log('Plex Discord Announcer listening...');
+app.listen(plexPort);
+console.log(`Plex Discord Announcer listening on ${plexPort}...`);
