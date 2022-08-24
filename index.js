@@ -9,9 +9,15 @@ const Constants = {
     ContentTypes: {
         movie: 'Movie',
         show:'TV show',
+        episode: 'Episode',
         artist: 'Artist',
         album:'Album',
-        unknown: 'Unknown media (&1)'
+        unknown: 'Unknown media'
+    },
+
+    UsesReleased: {
+        movie: true,
+        show: true
     }
 };
 
@@ -28,13 +34,15 @@ parsePlexHookPayload = (payload) => {
     const type = metadata?.type;
     const library = metadata?.librarySectionTitle;
     const title = metadata?.title;
-    const parentTitle = metadata?.parentTitle
+    const parentTitle = metadata?.parentTitle;
+    const grandParentTitle = metadata?.grandparentTitle;
     const summary = metadata?.summary;
     const year = metadata?.year;
     const classification = metadata?.contentRating;
     const rating = metadata?.rating || metadata?.audienceRating;
     const metaKey = metadata?.key;
 
+    console.log(type, { ...metadata, roles: [], actors: [] });
 
     switch(type){
         case 'artist': return {
@@ -53,7 +61,31 @@ parsePlexHookPayload = (payload) => {
             metaKey: metaKey
         };
 
-        case 'show':
+        case 'episode': return {
+            episode: title?.split(' ')?.[1],
+            season: parentTitle?.split(' ')?.[1],
+            name: grandParentTitle,
+            library: library,
+            summary: summary,
+            released: year,
+            classification: classification,
+            rating: rating,
+            summary: summary,
+            type: type,
+            metaKey: metaKey
+        };
+
+        case 'show': return { 
+            name: title,
+            library: library,
+            released: year,
+            classification: classification,
+            rating: rating,
+            summary: summary,
+            type: type,
+            metaKey: metaKey
+        };
+
         case 'movie': return { 
             name: title,
             library: library,
@@ -67,6 +99,8 @@ parsePlexHookPayload = (payload) => {
 
         default: return {
             name: title,
+            parent: parentTitle,
+            grandParent: grandParentTitle,
             library: library,
             type: type,
             metaKey: metaKey
@@ -76,7 +110,9 @@ parsePlexHookPayload = (payload) => {
 
 send = (msg) => {
     try {
-        discord.send(msg);
+        discord.send(msg).catch(e => {
+            console.log(e);
+        });
     } catch(e) {
         console.log(e);
     }
@@ -86,48 +122,82 @@ send = (msg) => {
 
 postToDiscord = (output) => {
     let msg = new MessageBuilder();
-    const mappedType = Constants.ContentTypes[output.type] ?? ContentTypes.unknown.replace('&1', output.type);
+    const mappedType = Constants.ContentTypes[output.type] ?? Constants.ContentTypes.unknown;
 
     msg.setDescription(`${mappedType} added to library`)
     msg.setColor('#FA8A03');
     
-    if(output.serverId){
+    if(output.serverId && output.metaKey){
         msg.setURL(`https://app.plex.tv/desktop/#!/server/${output.serverId}/details?key=${output.metaKey}`)
     }
 
-    if(output.type === 'artist'){
-        msg.setTitle(output.artist); 
-        msg.addField('Library', output.library);
-        return send(msg);
-    }
+   switch(output.type){
+        case 'artist': return announceNewArtist(msg, output);
+        case 'album': return announceNewAlbum(msg, output);
+        case 'movive':
+        case 'show':
+        case 'episode': 
+            return announceNewMovieOrShow(msg, output);
+        default: announceUnknownMedia(msg, output);
+   }
+};
 
-    if(output.type === 'album'){
-        output.released ? msg.setTitle(`${output.album} (${output.released})`) : msg.setTitle(`${output.album}`);
-        msg.addField('Artist', output.artist, true)
-        msg.addField('Library', output.library, true);
-        return send(msg);
-    }
-
-    if(output.type === 'movie' || output.Type === 'show'){
-        output.released ? msg.setTitle(`${output.name} (${output.released})`) : msg.setTitle(`${output.name}`); 
-        msg.addField('Synopsis', output.summary);
-
-        if(output.classification){
-            msg.addField('Classification', `${output.classification}`, true);
-        }
-
-        if(output.rating){
-            msg.addField('Rating', `${output.rating}`, true);
-        }
-
-        msg.addField('Library', output.library, true);
-        return send(msg);
-    }
-
-    msg.addField('Name', output.name, true);
+announceNewAlbum = (msg, output) => {
+    output.released ? msg.setTitle(`${output.album} (${output.released})`) : msg.setTitle(`${output.album}`);
+    msg.addField('Artist', output.artist, true)
     msg.addField('Library', output.library, true);
     return send(msg);
-}
+};
+
+announceNewArtist = (msg, output) => {
+    msg.setTitle(output.artist); 
+    msg.addField('Library', output.library);
+    return send(msg);
+};
+
+announceNewMovieOrShow = (msg, output) => {
+    if(output.season){
+        msg.addField('Season', output.season, true);
+    }
+    
+    if(output.episode){
+        msg.addField('Episode', output.episode, true);
+    }
+
+    output.released && Constants.UsesReleased[output.type] ? msg.setTitle(`${output.name} (${output.released})`) : msg.setTitle(`${output.name}`); 
+
+    if(output.summary){
+        msg.addField('Synopsis', output.summary);
+    }
+
+    if(output.classification){
+        msg.addField('Classification', `${output.classification}`, true);
+    }
+
+    if(output.rating){
+        msg.addField('Rating', `${output.rating}`, true);
+    }
+
+    msg.addField('Library', output.library, true);
+    return send(msg);
+};
+
+announceUnknownMedia = (msg, output) => {
+    msg.setTitle(mappedType);
+    msg.addField('Type', output.type);
+    msg.addField('Title 1', `${output.name}`, true);
+
+    if(output.parent){
+        msg.addField('Title 2', `${output.parent}`, true);
+    }
+   
+    if(output.grandParent){
+        msg.addField('Title 3', `${output.grandParent}`, true);
+    }
+    
+    msg.addField('Library', output.library, true);
+    return send(msg);
+};
 
 app.post('/', upload.single('thumb'), (req, res, next) => {
     if(!req || !req.body){
@@ -145,7 +215,6 @@ app.post('/', upload.single('thumb'), (req, res, next) => {
         const output = parsePlexHookPayload(payload);
 
         output.serverId = payload?.Server?.uuid
-
         console.log(output);
 
         try {
