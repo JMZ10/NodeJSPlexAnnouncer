@@ -160,87 +160,83 @@ announceUnknownMedia = (msg, output) => {
 
 prompt.start();
 
-init = () => {
-    prompt.get(['plexPort', 'discordUrl'], (err, result) => {
-        if (!result.plexPort || !result.discordUrl) {
-            console.log('\x1b[31mPlex port or Discord webhook url not supplied. Please try again.\x1b[0m\n');
-            return init();
+
+prompt.get(['plexPort', 'discordUrl'], (err, result) => {
+    if (!result.plexPort || !result.discordUrl) {
+        throw ('\x1b[31mPlex port or Discord webhook url not supplied. Please try again.\x1b[0m\n');
+    }
+
+    const plexPort = result.plexPort;
+    const discordUrl = result.discordUrl;
+    const { Webhook, MessageBuilder } = require('discord-webhook-nodejs');
+    const upload = multer({ dest: '/tmp/' });
+    const app = express();
+    const discord = new Webhook(discordUrl);
+
+    send = (msg) => {
+        try {
+            discord.send(msg).catch(e => {
+                console.log(e);
+            });
+        } catch (e) {
+            console.log(e);
         }
 
-        const plexPort = result.plexPort;
-        const discordUrl = result.discordUrl;
-        const { Webhook, MessageBuilder } = require('discord-webhook-nodejs');
-        const upload = multer({ dest: '/tmp/' });
-        const app = express();
-        const discord = new Webhook(discordUrl);
+        return;
+    };
 
-        send = (msg) => {
-            try {
-                discord.send(msg).catch(e => {
-                    console.log(e);
-                });
-            } catch (e) {
-                console.log(e);
-            }
+    postToDiscord = (output) => {
+        let msg = new MessageBuilder();
+        const mappedType = Constants.ContentTypes[output.type] ?? Constants.ContentTypes.unknown;
 
+        msg.setDescription(`${mappedType} added to library`)
+        msg.setColor('#FA8A03');
+
+        if (output.serverId && output.metaKey) {
+            msg.setURL(`https://app.plex.tv/desktop/#!/server/${output.serverId}/details?key=${output.metaKey}`)
+        }
+
+        switch (output.type) {
+            case 'artist': return announceNewArtist(msg, output);
+            case 'album': return announceNewAlbum(msg, output);
+            case 'movive':
+            case 'show':
+            case 'episode':
+                return announceNewMovieOrShow(msg, output);
+            default: announceUnknownMedia(msg, output);
+        }
+    };
+
+    app.post('/', upload.single('thumb'), (req, res, next) => {
+        if (!req || !req.body) {
+            console.log(req.body);
+            res.sendStatus(400);
             return;
-        };
+        }
 
-        postToDiscord = (output) => {
-            let msg = new MessageBuilder();
-            const mappedType = Constants.ContentTypes[output.type] ?? Constants.ContentTypes.unknown;
+        const payload = JSON.parse(req.body.payload);
+        const event = payload.event;
+        const timeString = `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
 
-            msg.setDescription(`${mappedType} added to library`)
-            msg.setColor('#FA8A03');
+        if (event === Constants.HookTypes.LibraryNew) {
+            console.log(`${timeString} [WebHook event] \x1b[32m${event}\x1b[0m`);
+            const output = parsePlexHookPayload(payload);
 
-            if (output.serverId && output.metaKey) {
-                msg.setURL(`https://app.plex.tv/desktop/#!/server/${output.serverId}/details?key=${output.metaKey}`)
+            output.serverId = payload?.Server?.uuid
+            console.log(output);
+
+            try {
+                postToDiscord(output);
+            } catch (e) {
+                console.error(e);
             }
+        } else {
+            console.log(`${timeString} [WebHook event] \x1b[31m${event}\x1b[0m`);
+        }
 
-            switch (output.type) {
-                case 'artist': return announceNewArtist(msg, output);
-                case 'album': return announceNewAlbum(msg, output);
-                case 'movive':
-                case 'show':
-                case 'episode':
-                    return announceNewMovieOrShow(msg, output);
-                default: announceUnknownMedia(msg, output);
-            }
-        };
-
-        app.post('/', upload.single('thumb'), (req, res, next) => {
-            if (!req || !req.body) {
-                console.log(req.body);
-                res.sendStatus(400);
-                return;
-            }
-
-            const payload = JSON.parse(req.body.payload);
-            const event = payload.event;
-            const timeString = `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-
-            if (event === Constants.HookTypes.LibraryNew) {
-                console.log(`${timeString} [WebHook event] \x1b[32m${event}\x1b[0m`);
-                const output = parsePlexHookPayload(payload);
-
-                output.serverId = payload?.Server?.uuid
-                console.log(output);
-
-                try {
-                    postToDiscord(output);
-                } catch (e) {
-                    console.error(e);
-                }
-            } else {
-                console.log(`${timeString} [WebHook event] \x1b[31m${event}\x1b[0m`);
-            }
-
-            res.sendStatus(200);
-        });
-
-        app.listen(plexPort);
-        console.log(`Plex Discord Announcer listening on ${plexPort}...`);
+        res.sendStatus(200);
     });
-};
 
-init();
+    app.listen(plexPort);
+    console.log(`Plex Discord Announcer listening on ${plexPort}...`);
+});
